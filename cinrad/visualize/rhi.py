@@ -3,6 +3,7 @@
 
 import os
 from datetime import datetime
+import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -12,11 +13,31 @@ from xarray import Dataset
 from cinrad.common import get_dtype
 from cinrad.visualize.utils import sec_plot, norm_plot, prodname, default_font_kw
 from cinrad.visualize.ppi import opposite_color, update_dict
+from cinrad.visualize.gpu import array_to_rgba
 
 __all__ = ["Section"]
 
 
 class Section(object):
+    """Plot vertical cross-sections or RHI figures.
+
+    Parameters
+    ----------
+    data : xarray.Dataset
+        The data used for plotting.
+    hlim : int, optional
+        Maximum height of y-axis.
+    interpolate : bool, optional
+        Use contourf when True, otherwise pcolormesh.
+    figsize : tuple, optional
+        Figure size.
+    style : str, optional
+        Background style.
+    text_param : dict, optional
+        Text drawing parameters.
+    use_gpu : bool, optional
+        Whether to map data to colors on GPU using CuPy.
+    """
     def __init__(
         self,
         data: Dataset,
@@ -25,6 +46,7 @@ class Section(object):
         figsize: tuple = (10, 5),
         style: str = "black",
         text_param: dict = None,
+        use_gpu: bool = False,
     ):
         # TODO: Use context manager to control style
         self.data = data
@@ -34,6 +56,7 @@ class Section(object):
             "interp": interpolate,
             "figsize": figsize,
             "style": style,
+            "use_gpu": use_gpu,
         }
         self.font_kw = default_font_kw.copy()
         self.font_kw["color"] = opposite_color(style)
@@ -58,17 +81,38 @@ class Section(object):
         )  ## 修改于2019-01-22 By WU Fulang
         cmap = sec_plot[self.dtype]
         norm = norm_plot[self.dtype]
-        if self.settings["interp"]:
-            plt.contourf(
-                xcor,
-                ycor,
-                rhi,
-                128,
-                cmap=cmap,
-                norm=norm,
-            )
-        else:
-            plt.pcolormesh(xcor, ycor, rhi, cmap=cmap, norm=norm, shading="auto")
+        if self.settings["use_gpu"] and not self.settings["interp"]:
+            try:
+                img = array_to_rgba(rhi, cmap, norm)
+                plt.imshow(
+                    img,
+                    extent=[xcor.min(), xcor.max(), ycor.min(), ycor.max()],
+                    origin="lower",
+                    aspect="auto",
+                )
+            except Exception as e:
+                warnings.warn(str(e), RuntimeWarning)
+                self.settings["use_gpu"] = False
+
+        if not self.settings["use_gpu"]:
+            if self.settings["interp"]:
+                plt.contourf(
+                    xcor,
+                    ycor,
+                    rhi,
+                    128,
+                    cmap=cmap,
+                    norm=norm,
+                )
+            else:
+                plt.pcolormesh(
+                    xcor,
+                    ycor,
+                    rhi,
+                    cmap=cmap,
+                    norm=norm,
+                    shading="auto",
+                )
         plt.ylim(0, self.settings["hlim"])
         if self.rhi_flag:
             title = "Range-Height Indicator\n"

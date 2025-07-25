@@ -187,6 +187,14 @@ This function is very similar to `vcs` argument of class `PPI`, but the range of
 
 Plot PUP STI product on the current PPI map, including past positions, current position, and forecast positions.
 
+### GPU acceleration
+
+From version 0.5, `PPI` and `Section` support optional GPU rendering through
+[CuPy](https://cupy.dev). When `use_gpu=True` is passed to these classes, data is
+mapped to colors on GPU and displayed via `imshow`, which can significantly
+accelerate drawing for large arrays if a CUDA-capable device is available.
+Install `cupy` separately to enable this feature.
+
 ## Gallery
 
 #### PPI reflectivity

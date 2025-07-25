@@ -15,6 +15,7 @@ from cartopy.mpl.geoaxes import GeoAxes
 from xarray import Dataset
 
 from cinrad.visualize.utils import *
+from cinrad.visualize.gpu import array_to_rgba
 from cinrad.utils import MODULE_DIR
 from cinrad.projection import get_coordinate
 from cinrad.io.level3 import StormTrackInfo
@@ -86,6 +87,8 @@ class PPI(object):
         text_param (dict): Optional parameters passed to matplotlib text function.
 
         add_shps (bool): Add shape files to the figure. Default True.
+
+        use_gpu (bool): Use CuPy to map data to colors on GPU. Default False.
     """
 
     # The CRS of data is believed to be PlateCarree.
@@ -110,6 +113,7 @@ class PPI(object):
         plot_labels: bool = True,
         text_param: Optional[dict] = None,
         add_shps: bool = True,
+        use_gpu: bool = False,
         **kwargs
     ):
         self.data = data
@@ -129,6 +133,7 @@ class PPI(object):
             "plot_labels": plot_labels,
             "is_inline": is_inline(),
             "add_shps": add_shps,
+            "use_gpu": use_gpu,
         }
         if fig is None:
             if style == "transparent":
@@ -216,28 +221,55 @@ class PPI(object):
         self._plot_ctx["var"] = var
         pnorm, cnorm, clabel = self._norm()
         pcmap, ccmap = self._cmap()
-        self.geoax.pcolormesh(
-            lon,
-            lat,
-            var,
-            norm=pnorm,
-            cmap=pcmap,
-            transform=self.data_crs,
-            shading="auto",
-            **kwargs
-        )
-        if self.rf_flag:
-            rf = self.data["RF"].values
+        if self.settings["use_gpu"]:
+            try:
+                img = array_to_rgba(var, pcmap, pnorm)
+                self.geoax.imshow(
+                    img,
+                    extent=[lon.min(), lon.max(), lat.min(), lat.max()],
+                    origin="lower",
+                    transform=self.data_crs,
+                )
+            except Exception as e:
+                warnings.warn(str(e), RuntimeWarning)
+                self.settings["use_gpu"] = False
+
+        if not self.settings["use_gpu"]:
             self.geoax.pcolormesh(
                 lon,
                 lat,
-                rf,
-                norm=norm_plot["RF"],
-                cmap=cmap_plot["RF"],
+                var,
+                norm=pnorm,
+                cmap=pcmap,
                 transform=self.data_crs,
                 shading="auto",
                 **kwargs
             )
+        if self.rf_flag:
+            rf = self.data["RF"].values
+            if self.settings["use_gpu"]:
+                try:
+                    rf_img = array_to_rgba(rf, cmap_plot["RF"], norm_plot["RF"])
+                    self.geoax.imshow(
+                        rf_img,
+                        extent=[lon.min(), lon.max(), lat.min(), lat.max()],
+                        origin="lower",
+                        transform=self.data_crs,
+                    )
+                except Exception as e:
+                    warnings.warn(str(e), RuntimeWarning)
+                    self.settings["use_gpu"] = False
+            if not self.settings["use_gpu"]:
+                self.geoax.pcolormesh(
+                    lon,
+                    lat,
+                    rf,
+                    norm=norm_plot["RF"],
+                    cmap=cmap_plot["RF"],
+                    transform=self.data_crs,
+                    shading="auto",
+                    **kwargs
+                )
         if not self.settings["extent"]:
             self._autoscale()
         if self.settings["add_shps"]:
